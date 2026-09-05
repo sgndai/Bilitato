@@ -51,6 +51,7 @@ const state = {
 };
 
 const app = document.getElementById("app");
+let refreshRequestSeq = 0;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -272,10 +273,14 @@ async function getActiveTab() {
 }
 
 async function refreshState({ quiet = false, hydrate = false, refreshFeedback = false } = {}) {
+    const requestSeq = ++refreshRequestSeq;
+    const isCurrentRequest = () => requestSeq === refreshRequestSeq;
     try {
         const tab = await getActiveTab();
+        if (!isCurrentRequest()) return;
         if (!tab?.id) {
             await restoreHiddenEmbedded();
+            if (!isCurrentRequest()) return;
             state.tabId = 0;
             state.tabState = null;
             state.cache = null;
@@ -287,12 +292,14 @@ async function refreshState({ quiet = false, hydrate = false, refreshFeedback = 
         if (!state.switchingToEmbedded) {
             await hideEmbeddedForActiveTab(tab.id);
         }
+        if (!isCurrentRequest()) return;
         const result = await chrome.runtime.sendMessage({
             action: "GET_BOOTSTRAP",
             tabId: tab.id,
             skipCloud: !hydrate,
             refreshFeedback
         });
+        if (!isCurrentRequest()) return;
         if (!result?.ok) throw new Error(result?.error || "读取视频状态失败");
         const nextBvid = String(result.tabState?.activeBvid || result.cache?.bvid || result.bvid || "");
         const nextCid = result.tabState && Object.prototype.hasOwnProperty.call(result.tabState, "activeCid")
@@ -361,8 +368,11 @@ async function refreshState({ quiet = false, hydrate = false, refreshFeedback = 
             state.initialized = true;
         }
         state.providers = result.providers || {};
-        state.settingsUiOptions = await contentAction("get-settings-ui-options").catch(() => state.settingsUiOptions);
+        const nextSettingsUiOptions = await contentAction("get-settings-ui-options").catch(() => state.settingsUiOptions);
+        if (!isCurrentRequest()) return;
+        state.settingsUiOptions = nextSettingsUiOptions;
         const subtitleOptionState = await contentAction("get-subtitle-options").catch(() => null);
+        if (!isCurrentRequest()) return;
         state.subtitleOptions = Array.isArray(subtitleOptionState?.options) ? subtitleOptionState.options : [];
         state.activeSubtitleId = String(subtitleOptionState?.activeId || state.cache?.subtitleLanguage || "");
         state.feedback = result.feedback || null;
@@ -386,6 +396,7 @@ async function refreshState({ quiet = false, hydrate = false, refreshFeedback = 
         checkLatestVersionAvailability().catch(() => {});
         if (hydrate) refreshAnnouncementUnreadState().catch(() => {});
     } catch (error) {
+        if (!isCurrentRequest()) return;
         if (!quiet) state.error = error?.message || "读取失败";
         render();
     }
@@ -2137,17 +2148,21 @@ app.addEventListener("keydown", (event) => {
 });
 
 chrome.storage.onChanged.addListener((changes) => {
-    const summaryDraftKeys = Object.keys(changes || {}).filter((key) => key.startsWith(SUMMARY_DRAFT_STORAGE_PREFIX));
-    summaryDraftKeys.forEach((key) => {
-        const draft = changes[key]?.newValue;
-        const draftBvid = String(draft?.bvid || key.slice(SUMMARY_DRAFT_STORAGE_PREFIX.length)).trim().toLowerCase();
-        if (draft && draftBvid && draftBvid === String(state.activeBvid || "").trim().toLowerCase()) {
+    const activePartKey = getActivePartKey();
+    const summaryDraftKey = activePartKey ? `${SUMMARY_DRAFT_STORAGE_PREFIX}${activePartKey}` : "";
+    const summaryDraftChange = summaryDraftKey ? changes?.[summaryDraftKey] : null;
+    if (summaryDraftChange) {
+        const draft = summaryDraftChange.newValue;
+        const draftBvid = String(draft?.bvid || "").trim().toLowerCase();
+        const draftCid = Number(draft?.cid || 0);
+        const draftPartKey = draftBvid && draftCid > 0 ? `${draftBvid}::${draftCid}` : "";
+        if (draft && draftPartKey === activePartKey) {
             state.summaryStreamDraft = draft;
-        } else if (!draft && (!state.summaryStreamDraft?.bvid || draftBvid === String(state.summaryStreamDraft.bvid).toLowerCase())) {
+        } else if (!draft) {
             state.summaryStreamDraft = null;
         }
-    });
-    if (summaryDraftKeys.length) render();
+        render();
+    }
     if (Object.keys(changes || {}).some((key) => key.startsWith("topAnnouncementDismissed:"))) {
         refreshAnnouncementUnreadState().catch(() => {});
     }
@@ -2163,9 +2178,12 @@ chrome.storage.onChanged.addListener((changes) => {
 
 chrome.runtime.onMessage.addListener((message) => {
     const action = String(message?.action || "");
+    if (action !== "SUMMARY_STREAM_UPDATE" && action !== "SUMMARY_STREAM_CLEAR") return false;
     const messageBvid = String(message?.bvid || message?.draft?.bvid || "").trim().toLowerCase();
-    const currentBvid = String(state.activeBvid || "").trim().toLowerCase();
-    if (!messageBvid || !currentBvid || messageBvid !== currentBvid) return false;
+    const messageCid = Number(message?.cid || message?.draft?.cid || 0);
+    const messagePartKey = messageBvid && messageCid > 0 ? `${messageBvid}::${messageCid}` : "";
+    const currentPartKey = getActivePartKey();
+    if (!messagePartKey || !currentPartKey || messagePartKey !== currentPartKey) return false;
     if (action === "SUMMARY_STREAM_UPDATE" && message?.draft) {
         if (Number(message.draft.updatedAt || 0) >= Number(state.summaryStreamDraft?.updatedAt || 0)) {
             state.summaryStreamDraft = message.draft;

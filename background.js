@@ -7346,7 +7346,7 @@ async function runSummarySegmentsInQuality(tabId, bvid, force, settings, taskCon
         }
         if (!forceWrite && now - Number(state.lastPersistAt || 0) >= SUMMARY_DRAFT_PERSIST_INTERVAL_MS) {
             state.lastPersistAt = now;
-            const key = `${SUMMARY_DRAFT_STORAGE_PREFIX}${draft.bvid}`;
+            const key = `${SUMMARY_DRAFT_STORAGE_PREFIX}${draft.bvid}::${draft.cid}`;
             void chrome.storage.local.set({ [key]: draft }).catch((error) => {
                 logCache.debug("summary_draft_persist_failed", {
                     key,
@@ -7366,7 +7366,7 @@ async function runSummarySegmentsInQuality(tabId, bvid, force, settings, taskCon
         };
         void chrome.tabs.sendMessage(tabId, message).catch(() => {});
         void chrome.runtime.sendMessage(message).catch(() => {});
-        void chrome.storage.local.remove(`${SUMMARY_DRAFT_STORAGE_PREFIX}${normalizedBvid}`).catch(() => {});
+        void chrome.storage.local.remove(`${SUMMARY_DRAFT_STORAGE_PREFIX}${normalizedBvid}::${Number(taskContext.cid || 0)}`).catch(() => {});
     }
     const summaryExists = !force && String(cache?.summary || "").trim();
     const segmentsExists = !force && Array.isArray(cache?.segments) && cache.segments.length > 0;

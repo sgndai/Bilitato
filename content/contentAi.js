@@ -18,12 +18,20 @@
     
         const current = String(currentBvid || "").toLowerCase();
         const cacheBvid = String(cache?.bvid || "").toLowerCase();
+        const cacheCid = Number(cache?.cid || 0);
+        let cidMatches = true;
+        if (typeof appState !== "undefined") {
+            const currentCid = [appState?.injectCid, appState?.tabState?.activeCid]
+                .map((value) => Number(value || 0))
+                .find((value) => Number.isFinite(value) && value > 0) || 0;
+            cidMatches = currentCid > 0 && cacheCid > 0 && cacheCid === currentCid;
+        }
     
         const hasSubtitle =
             (Array.isArray(cache?.rawSubtitle) && cache.rawSubtitle.length > 0) ||
             (Array.isArray(cache?.processedSubtitle) && cache.processedSubtitle.length > 0);
     
-        return !!current && cacheBvid === current && hasSubtitle;
+        return !!current && cacheBvid === current && cidMatches && hasSubtitle;
     }
 
     function getSubtitleDependencyState({

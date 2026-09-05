@@ -9,9 +9,9 @@ describe("contentUtils", () => {
     expect(utils.normalizeBvidCase("https://www.bilibili.com/video/BV1AbCdEfGh1/")).toBe("bv1abcdefgh1");
   });
 
-  it("reads page or time parameters from Bilibili URLs", () => {
+  it("reads page parameters and ignores playback time parameters", () => {
     expect(utils.getTidFromUrl("https://www.bilibili.com/video/BVxxx?p=3")).toBe("3");
-    expect(utils.getTidFromUrl("https://www.bilibili.com/video/BVxxx?t=120")).toBe("120");
+    expect(utils.getTidFromUrl("https://www.bilibili.com/video/BVxxx?t=120")).toBe("");
   });
 
   it("formats playback and SRT timestamps", () => {
