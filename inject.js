@@ -137,7 +137,7 @@
                     const dash = playData?.dash;
                     if (dash) {
                         const requestBvid = String(this.__biliRequestMeta?.bvid || "").trim();
-                        const routeBvid = window.location.href.match(/BV[a-zA-Z0-9]{10}/)?.[0] || "";
+                        const routeBvid = getBvidFromUrl(window.location.href);
                         if (requestBvid && routeBvid && requestBvid.toLowerCase() !== routeBvid.toLowerCase()) {
                             emitLog("playinfo_stale_skip", { request_bvid: requestBvid, route_bvid: routeBvid });
                             return;
@@ -698,7 +698,7 @@
         const videoData = state.videoData || {};
         const pages = Array.isArray(videoData.pages) ? videoData.pages : [];
         const url = new URL(location.href);
-        const routeBvid = location.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/)?.[1] || "";
+        const routeBvid = getBvidFromUrl(location.href);
         const stateBvid = String(videoData.bvid || state.bvid || "").trim();
         const stateMatchesRoute = !routeBvid || !stateBvid || routeBvid.toLowerCase() === stateBvid.toLowerCase();
         const bvid = routeBvid || stateBvid;
@@ -738,8 +738,16 @@
     }
 
     function getBvidFromUrl(url) {
-        const match = String(url || "").match(/\/video\/(BV[0-9A-Za-z]+)/i);
-        return match ? match[1] : "";
+        const raw = String(url || "").trim();
+        if (!raw) return "";
+        const videoMatch = raw.match(/\/video\/(BV[0-9A-Za-z]+)/i);
+        if (videoMatch) return String(videoMatch[1] || "").trim();
+        try {
+            const parsed = new URL(raw, location.href);
+            return String(parsed.searchParams.get("bvid") || "").trim();
+        } catch (_) {
+            return "";
+        }
     }
 
     function getRouteTid() {

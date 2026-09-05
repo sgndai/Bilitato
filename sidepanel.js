@@ -1626,13 +1626,16 @@ async function handleAction(actionNode) {
     const action = actionNode.dataset.action;
     if (action === "refresh") return refreshState({ hydrate: true });
     if (action === "switch-to-embedded") {
+        if (state.switchingToEmbedded) return;
         state.switchingToEmbedded = true;
-        const targetTabId = state.tabId || state.hiddenEmbeddedTabId;
         try {
-            if (targetTabId) await setEmbeddedVisibleForTab(targetTabId, true);
-            if (state.tabId) await contentAction("switch-to-embedded");
+            if (!state.tabId) throw new Error("未找到当前视频标签页");
+            const result = await contentAction("switch-to-embedded");
+            if (result?.ready !== true) {
+                throw new Error("内嵌面板尚未就绪");
+            }
             state.hiddenEmbeddedTabId = 0;
-            setTimeout(() => window.close(), 80);
+            window.close();
         } catch (error) {
             state.switchingToEmbedded = false;
             throw error;

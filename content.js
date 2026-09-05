@@ -9465,15 +9465,17 @@ async function startTranscriptionFromCapsule() {
         title: cleanBilibiliTitle(document.title)
     };
     const meta = appState.transcriptionCapsuleMeta || fallbackMeta;
-    const bvid = normalizeBvidCase(meta?.bvid || "");
+    const routeBvid = normalizeBvidCase(getBvidFromUrl(location.href) || resolveCurrentBvid() || "");
+    const bvid = routeBvid || normalizeBvidCase(meta?.bvid || "");
     const progressTaskId = `transcribe:${bvid || "unknown"}`;
-    const injectBvid = normalizeBvidCase(appState.injectBvid || "");
-    if (!meta || !bvid || !injectBvid || bvid !== injectBvid) {
+    let injectBvid = normalizeBvidCase(appState.injectBvid || "");
+    if (!meta || !bvid) {
         logContent.warn("asr_start_blocked", {
             task: "asr",
             bvid,
             code: "ASR_VIDEO_STATE_CHANGED",
             detail: {
+                route_bvid: routeBvid,
                 inject_bvid: injectBvid,
                 has_meta: !!meta
             }
@@ -9516,8 +9518,10 @@ async function startTranscriptionFromCapsule() {
         showToast("正在确认当前分 P，请稍后再试");
         return;
     }
+    injectBvid = normalizeBvidCase(appState.injectBvid || bvid);
     const confirmedMeta = {
         ...meta,
+        bvid,
         cid: confirmedCid,
         tid: getRoutePartId() || meta?.tid || null
     };
@@ -9674,19 +9678,19 @@ async function startTranscriptionFromCapsule() {
 }
 
 async function handleRegenerateGroqSubtitle() {
-    const currentBvid = normalizeBvidCase(resolveCurrentBvid() || "");
-    const injectBvid = normalizeBvidCase(appState.injectBvid || "");
-    if (!currentBvid || !injectBvid || currentBvid !== injectBvid) {
+    const currentBvid = normalizeBvidCase(getBvidFromUrl(location.href) || resolveCurrentBvid() || "");
+    if (!currentBvid) {
         showToast("当前视频状态已变化，请稍后重试");
         return;
     }
     const subtitleSource = String(appState.tabState?.subtitleSource || "");
     if (!(subtitleSource === "groq" || subtitleSource === "whisper" || subtitleSource === "siliconflow" || subtitleSource === "funasr" || subtitleSource === "mimo" || subtitleSource === "custom_asr")) return;
-    const confirmedCid = await waitForConfirmedRouteCid(injectBvid);
+    const confirmedCid = await waitForConfirmedRouteCid(currentBvid);
     if (!(confirmedCid > 0)) {
         showToast("正在确认当前分 P，请稍后再试");
         return;
     }
+    const injectBvid = normalizeBvidCase(appState.injectBvid || currentBvid);
     appState.subtitleTimeline = [];
     appState.cache = {
         ...(appState.cache || {}),
@@ -11169,6 +11173,13 @@ async function requestFromInject(timeoutMs = 500) {
 async function waitForConfirmedRouteCid(targetBvid, timeoutMs = 7000) {
     const expectedBvid = normalizeBvidCase(targetBvid || "");
     if (!expectedBvid) return 0;
+    const routeBvidAtStart = normalizeBvidCase(getBvidFromUrl(location.href) || "");
+    if (!routeBvidAtStart || routeBvidAtStart !== expectedBvid) return 0;
+    if (normalizeBvidCase(appState.injectBvid || "") !== expectedBvid) {
+        appState.injectBvid = expectedBvid;
+        appState.injectCid = 0;
+        appState.injectPartCount = 0;
+    }
     const deadline = Date.now() + Math.max(500, Number(timeoutMs || 0));
     while (Date.now() < deadline) {
         const routeBvid = normalizeBvidCase(getBvidFromUrl(location.href) || "");
@@ -11654,10 +11665,32 @@ function onSidePanelMessage(message, sender, sendResponse) {
             return {};
         }
         if (command === "switch-to-embedded") {
+            const expectedBvid = normalizeBvidCase(getBvidFromUrl(location.href) || resolveCurrentBvid() || "");
+            if (!expectedBvid) throw new Error("当前视频标识尚未就绪");
+
+            let root = document.getElementById("__bili_ai_plugin_root__");
+            if (!root?.shadowRoot) {
+                await waitPanelMount();
+                root = document.getElementById("__bili_ai_plugin_root__");
+            }
+            if (!root?.isConnected || !root.shadowRoot) {
+                throw new Error("内嵌面板创建失败");
+            }
+
+            const confirmedCid = await waitForConfirmedRouteCid(expectedBvid);
+            const currentBvid = normalizeBvidCase(getBvidFromUrl(location.href) || resolveCurrentBvid() || "");
+            const currentCid = getCurrentRouteCid();
+            if (currentBvid !== expectedBvid || !(confirmedCid > 0) || currentCid !== confirmedCid) {
+                throw new Error("内嵌面板尚未绑定当前视频");
+            }
+
             setEmbeddedPanelVisible(true);
-            const root = document.getElementById("__bili_ai_plugin_root__");
-            root?.scrollIntoView({ behavior: "smooth", block: "start" });
-            return {};
+            if (root.style.display === "none") {
+                throw new Error("内嵌面板显示失败");
+            }
+
+            root.scrollIntoView({ behavior: "smooth", block: "start" });
+            return { ready: true, bvid: currentBvid, cid: currentCid };
         }
         if (command === "set-embedded-visible") {
             setEmbeddedPanelVisible(message?.visible !== false);
