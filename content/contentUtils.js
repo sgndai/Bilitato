@@ -44,8 +44,17 @@
     }
 
     function getBvidFromUrl(url) {
-        const match = String(url).match(/\/video\/(BV[0-9A-Za-z]+)/i);
-        return match ? match[1] : "";
+        const raw = String(url || "").trim();
+        if (!raw) return "";
+        const pathMatch = raw.match(/\/video\/(BV[0-9A-Za-z]+)/i);
+        if (pathMatch) return pathMatch[1];
+        try {
+            const parsed = new URL(raw, "https://www.bilibili.com");
+            const queryBvid = String(parsed.searchParams.get("bvid") || "").trim();
+            return /^BV[0-9A-Za-z]+$/i.test(queryBvid) ? queryBvid : "";
+        } catch (_) {
+            return "";
+        }
     }
 
     function normalizeBvidCase(value) {
@@ -56,8 +65,8 @@
     }
 
     function getTidFromUrl(url) {
-        const parsed = new URL(url);
-        return parsed.searchParams.get("p") || parsed.searchParams.get("t") || "";
+        const parsed = new URL(url, "https://www.bilibili.com");
+        return parsed.searchParams.get("p") || "";
     }
 
     function formatTime(sec) {
